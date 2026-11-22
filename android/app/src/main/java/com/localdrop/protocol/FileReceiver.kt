@@ -2,6 +2,7 @@ package com.localdrop.protocol
 
 import android.content.Context
 import android.media.MediaScannerConnection
+import android.os.Environment
 import android.os.StatFs
 import com.localdrop.crypto.PathSanitizer
 import java.io.File
@@ -25,8 +26,12 @@ class FileReceiver(
     private val freeBytes: (File) -> Long = { StatFs(it.path).availableBytes },
 ) {
     private class Active(
-        val entry: FileEntry, val part: File, val target: File,
-        val out: FileOutputStream, val digest: MessageDigest, var received: Long,
+        val entry: FileEntry,
+        val part: File,
+        val target: File,
+        val out: FileOutputStream,
+        val digest: MessageDigest,
+        var received: Long,
     )
 
     private val byId = manifest.entries.associateBy { it.id }
@@ -47,8 +52,9 @@ class FileReceiver(
             needed += e.size - have
         }
         val free = freeBytes(destinationDir)
-        if (needed + SAFETY_MARGIN > free)
+        if (needed + SAFETY_MARGIN > free) {
             return ManifestAck(false, "Espace insuffisant : $needed octets requis, $free disponibles", 1, emptyMap())
+        }
         return ManifestAck(true, "", workers, resume)
     }
 
@@ -58,9 +64,17 @@ class FileReceiver(
         part.parentFile?.mkdirs()
         val digest = MessageDigest.getInstance("SHA-256")
         val start = if (part.isFile && offset > 0 && part.length() >= offset) offset else 0L
-        if (start > 0) { // ré-alimente le hash avec le préfixe déjà reçu
-            part.inputStream().use { i -> val b = ByteArray(Limits.CHUNK); var left = start
-                while (left > 0) { val r = i.read(b, 0, minOf(b.size.toLong(), left).toInt()); if (r < 0) break; digest.update(b, 0, r); left -= r } }
+        if (start > 0) {
+            part.inputStream().use { i ->
+                val b = ByteArray(Limits.CHUNK)
+                var left = start
+                while (left > 0) {
+                    val r = i.read(b, 0, minOf(b.size.toLong(), left).toInt())
+                    if (r < 0) break
+                    digest.update(b, 0, r)
+                    left -= r
+                }
+            }
         }
         RandomAccessFile(part, "rw").use { it.setLength(start) }
         active[fileId] = Active(e, part, targetOf(e), FileOutputStream(part, true), digest, start)
@@ -69,7 +83,7 @@ class FileReceiver(
     fun write(fileId: Int, offset: Long, buf: ByteArray, off: Int, len: Int) {
         val a = active[fileId] ?: throw IOException("transfert non démarré")
         if (offset != a.received) throw IOException("offset inattendu")
-        if (a.received + len > a.entry.size) throw SecurityException("dépassement de la taille annoncée") // anti-flood
+        if (a.received + len > a.entry.size) throw SecurityException("dépassement de la taille annoncée")
         a.out.write(buf, off, len)
         a.digest.update(buf, off, len)
         a.received += len
@@ -79,31 +93,56 @@ class FileReceiver(
     fun finish(fileId: Int, expectedSha256: ByteArray): File {
         val a = active.remove(fileId) ?: throw IOException("transfert non démarré")
         try {
-            a.out.flush(); a.out.fd.sync(); a.out.close()
+            a.out.flush()
+            a.out.fd.sync()
+            a.out.close()
             if (a.received != a.entry.size) throw IOException("taille incomplète")
             if (!MessageDigest.isEqual(a.digest.digest(), expectedSha256)) throw IOException("empreinte SHA-256 différente")
         } catch (e: Exception) {
-            runCatching { a.out.close() }; a.part.delete(); throw if (e is IOException) e else IOException(e)
+            runCatching { a.out.close() }
+            a.part.delete()
+            throw if (e is IOException) e else IOException(e)
         }
         val finalFile = PathSanitizer.uniqueFile(a.target)
-        Files.move(a.part.toPath(), finalFile.toPath(), StandardCopyOption.ATOMIC_MOVE)
-        context?.let { MediaScannerConnection.scanFile(it, arrayOf(finalFile.path), null, null) } // visible dans la Galerie
+        try {
+            Files.move(a.part.toPath(), finalFile.toPath(), StandardCopyOption.ATOMIC_MOVE)
+        } catch (_: IOException) {
+            Files.move(a.part.toPath(), finalFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        }
+        context?.let { MediaScannerConnection.scanFile(it, arrayOf(finalFile.path), null, null) }
         return finalFile
     }
 
     /** Annulation utilisateur : nettoie les .part. (Sur coupure réseau on les garde pour la reprise.) */
     fun abortAll(deletePartials: Boolean) {
-        active.values.forEach { runCatching { it.out.close() }; if (deletePartials) it.part.delete() }
+        active.values.forEach {
+            runCatching { it.out.close() }
+            if (deletePartials) it.part.delete()
+        }
         active.clear()
         if (deletePartials) manifest.entries.forEach { partOf(it).delete() }
     }
 
     private fun sha256Prefix(f: File, n: Long): ByteArray {
         val d = MessageDigest.getInstance("SHA-256")
-        f.inputStream().use { i -> val b = ByteArray(Limits.CHUNK); var left = n
-            while (left > 0) { val r = i.read(b, 0, minOf(b.size.toLong(), left).toInt()); if (r < 0) break; d.update(b, 0, r); left -= r } }
+        f.inputStream().use { i ->
+            val b = ByteArray(Limits.CHUNK)
+            var left = n
+            while (left > 0) {
+                val r = i.read(b, 0, minOf(b.size.toLong(), left).toInt())
+                if (r < 0) break
+                d.update(b, 0, r)
+                left -= r
+            }
+        }
         return d.digest()
     }
 
-    companion object { const val SAFETY_MARGIN = 16L * 1024 * 1024 }
+    companion object {
+        const val SAFETY_MARGIN = 16L * 1024 * 1024
+        fun defaultDestinationDir(): File = File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+            "LocalDrop"
+        )
+    }
 }
