@@ -1,0 +1,6 @@
+-keep class org.bouncycastle.** { *; }
+-dontwarn org.bouncycastle.**
+-dontwarn io.netty.**
+-dontwarn org.slf4j.**
+-dontwarn java.lang.management.**
+-keep class io.ktor.** { *; }
