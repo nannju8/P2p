@@ -51,6 +51,8 @@ data class PickerUiState(
     val ascending: Boolean = true,
     val loading: Boolean = false,
     val hasAllFilesAccess: Boolean = false,
+    val hasMediaAccess: Boolean = false,
+    val canUseAllFilesScreen: Boolean = true,
     val cart: Map<String, PickedItem> = emptyMap(),
 ) {
     val cartCount: Int get() = cart.size
