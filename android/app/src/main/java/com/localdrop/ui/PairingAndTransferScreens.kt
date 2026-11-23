@@ -18,6 +18,8 @@ import androidx.compose.material.icons.filled.Backspace
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.QrCode2
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -62,6 +64,8 @@ fun SenderPairingScreen(
     onRotateCode: () -> Unit,
     onCancel: () -> Unit,
 ) {
+    var showWifiQr by remember { mutableStateOf(false) }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -73,11 +77,18 @@ fun SenderPairingScreen(
         Column(
             modifier = Modifier.fillMaxSize().padding(pad).padding(20.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(18.dp)
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             NetworkAssistBar(network, onToggleHotspot, onStartWifiDirect, onClearNetError)
 
-            Spacer(Modifier.height(8.dp))
+            if (network.hotspotInfo != null) {
+                Button(onClick = { showWifiQr = true }, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Default.QrCode2, contentDescription = null)
+                    Spacer(Modifier.padding(4.dp))
+                    Text("Afficher le QR Code Wi-Fi (pour le récepteur)")
+                }
+            }
+
             Text("Saisissez ce code sur le téléphone récepteur", style = MaterialTheme.typography.titleMedium)
 
             Card(shape = RoundedCornerShape(20.dp)) {
@@ -86,7 +97,7 @@ fun SenderPairingScreen(
                     fontSize = 52.sp,
                     fontWeight = FontWeight.Black,
                     color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(horizontal = 28.dp, vertical = 20.dp)
+                    modifier = Modifier.padding(horizontal = 28.dp, vertical = 18.dp)
                 )
             }
 
@@ -112,6 +123,16 @@ fun SenderPairingScreen(
             }
         }
     }
+
+    val hs = network.hotspotInfo
+    if (showWifiQr && hs != null) {
+        QrCodeDialog(
+            title = "Scanner avec l'autre téléphone",
+            subtitle = "Réseau : ${hs.ssid}",
+            content = hs.wifiQr(),
+            onDismiss = { showWifiQr = false }
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -123,11 +144,13 @@ fun ReceiverPairingScreen(
     onToggleHotspot: () -> Unit,
     onStartWifiDirect: () -> Unit,
     onClearNetError: () -> Unit,
+    onScanWifiQr: (String) -> Unit,
     onSubmitCode: (Peer, String) -> Unit,
     onCancel: () -> Unit,
 ) {
     var selectedPeer by remember { mutableStateOf<Peer?>(null) }
     var typed by remember { mutableStateOf("") }
+    var showScanner by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -146,6 +169,17 @@ fun ReceiverPairingScreen(
 
             val peer = selectedPeer
             if (peer == null) {
+                // Gros bouton Scanner QR juste ici !
+                Button(
+                    onClick = { showScanner = true },
+                    modifier = Modifier.fillMaxWidth().height(54.dp),
+                    shape = RoundedCornerShape(14.dp),
+                ) {
+                    Icon(Icons.Default.QrCodeScanner, contentDescription = null)
+                    Spacer(Modifier.padding(6.dp))
+                    Text("Scanner le QR Wi-Fi de l'envoyeur", fontWeight = FontWeight.SemiBold)
+                }
+
                 Text("Envoyeurs détectés à proximité :", style = MaterialTheme.typography.titleMedium)
                 if (peers.isEmpty()) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -209,6 +243,14 @@ fun ReceiverPairingScreen(
                 }
             }
         }
+    }
+
+    if (showScanner) {
+        QrScannerDialog(
+            title = "Scanner le QR Wi-Fi",
+            onScanned = { raw -> showScanner = false; onScanWifiQr(raw) },
+            onDismiss = { showScanner = false }
+        )
     }
 }
 
