@@ -29,12 +29,22 @@ class FilePickerDelegate(
     fun refreshPermissionsAndVolumes() {
         scope.launch {
             val allFiles = StorageScanner.hasAllFilesAccess(ctx)
+            val mediaOk = StorageScanner.hasMediaAccess(ctx)
+            val canAllScreen = StorageScanner.canUseAllFilesScreen(ctx)
             val vols = withContext(Dispatchers.IO) { StorageScanner.storageVolumes(ctx) }
             val currentVol = _state.value.selectedVolume?.takeIf { v -> vols.any { it.id == v.id } } ?: vols.firstOrNull()
             val startDir = _state.value.currentDir?.takeIf { it.exists() } ?: currentVol?.root
+            val nextCategory = if (!allFiles && mediaOk && _state.value.category == FileCategory.MEMORY) {
+                FileCategory.VIDEOS
+            } else {
+                _state.value.category
+            }
             _state.update {
                 it.copy(
                     hasAllFilesAccess = allFiles,
+                    hasMediaAccess = mediaOk,
+                    canUseAllFilesScreen = canAllScreen,
+                    category = nextCategory,
                     volumes = vols,
                     selectedVolume = currentVol,
                     currentDir = startDir
