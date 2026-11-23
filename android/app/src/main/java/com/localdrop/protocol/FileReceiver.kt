@@ -1,6 +1,6 @@
 package com.localdrop.protocol
 
-import android.Manifest
+import android.Manifest as AndroidManifest
 import android.content.ContentValues
 import android.content.Context
 import android.content.pm.PackageManager
@@ -216,7 +216,7 @@ class FileReceiver(
             return when {
                 Build.VERSION.SDK_INT >= 30 -> Environment.isExternalStorageManager()
                 Build.VERSION.SDK_INT == 29 -> Environment.isExternalStorageLegacy()
-                else -> ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
+                else -> ContextCompat.checkSelfPermission(context, AndroidManifest.permission.WRITE_EXTERNAL_STORAGE) ==
                     PackageManager.PERMISSION_GRANTED
             }
         }
