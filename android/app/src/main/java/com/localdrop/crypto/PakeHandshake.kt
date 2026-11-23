@@ -14,20 +14,6 @@ import java.io.DataOutputStream
 import java.math.BigInteger
 import java.security.SecureRandom
 
-/**
- * Échange PAKE balancé basé sur le code à 4 chiffres.
- *
- * CHOIX D'ARCHITECTURE : BouncyCastle (bcprov) n'embarque pas SPAKE2. Plutôt que d'écrire
- * SPAKE2 « à la main » (interdit par la règle n°4), on utilise **J-PAKE** (RFC 8236) dans
- * l'implémentation éprouvée de BouncyCastle (groupe NIST 2048 bits, SHA-256) :
- *   - le code n'est JAMAIS transmis, ni sous forme de hash : seuls des éléments de groupe
- *     et des preuves à divulgation nulle de connaissance circulent ;
- *   - un attaquant actif ne peut tester qu'UN seul code par session de handshake
- *     (d'où la limite de 3 essais + rotation du code, cf. PairingGuard) ;
- *   - le round 3 fournit la confirmation de clé mutuelle (explicit key confirmation).
- *
- * Séquence (symétrique) : round1 ⇄ round2 ⇄ round3 ; puis [deriveSessionKeys].
- */
 class PakeHandshake(
     private val selfId: String,
     private val peerId: String,
@@ -70,10 +56,9 @@ class PakeHandshake(
     fun round3(): ByteArray = encode { out ->
         val p = participant.createRound3PayloadToSend(checkNotNull(keyingMaterial) { "round2 manquant" })
         out.writeUTF(p.participantId)
-        writeBig(out, p.magTag)
+        writeBig(out, p.macTag)
     }
 
-    /** @throws CryptoException si le code saisi diffère (confirmation de clé échouée). */
     fun onRound3(bytes: ByteArray) = decode(bytes) { inp ->
         val id = inp.readUTF()
         val payload = JPAKERound3Payload(id, readBig(inp))
@@ -81,7 +66,6 @@ class PakeHandshake(
         participant.validateRound3PayloadReceived(payload, checkNotNull(keyingMaterial))
     }
 
-    /** À appeler uniquement après round3 validé des deux côtés. */
     fun deriveSessionKeys(): SessionKeys {
         val km = checkNotNull(keyingMaterial)
         val ikm = km.toByteArray()
@@ -101,7 +85,6 @@ class PakeHandshake(
         if (id != peerId) throw CryptoException("Identité de pair inattendue")
     }
 
-    // ── sérialisation binaire minimale (longueur préfixée, taille bornée) ───────────────
     private fun encode(block: (DataOutputStream) -> Unit): ByteArray {
         val bos = ByteArrayOutputStream()
         DataOutputStream(bos).use(block)
