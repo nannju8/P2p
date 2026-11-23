@@ -106,6 +106,7 @@ private fun LocalDropApp(vm: SessionViewModel = viewModel()) {
                 onToggleHotspot = { vm.toggleLocalHotspot() },
                 onStartWifiDirect = { vm.startWifiDirect5Ghz() },
                 onClearNetError = { vm.clearNetworkError() },
+                onScanWifiQr = { vm.connectViaWifiQr(it) },
                 onSubmitCode = { peer, code -> vm.joinSenderWithCode(peer, code) },
                 onCancel = { vm.endSession(keepScreen = false) }
             )
