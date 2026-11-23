@@ -15,11 +15,8 @@ android {
         versionCode = 1
         versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-    }
-
-    // Ne garde que le français et l'anglais pour alléger l'APK
-    androidResources {
-        localeFilters.addAll(listOf("fr", "en"))
+        // Ne garde que le français et l'anglais pour alléger l'APK
+        resourceConfigurations.addAll(listOf("fr", "en"))
     }
 
     // APK UNIVERSEL MONOLITHIQUE (repartageable tel quel via le Mode Invite Web)
