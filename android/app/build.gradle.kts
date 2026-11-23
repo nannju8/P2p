@@ -15,11 +15,9 @@ android {
         versionCode = 1
         versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        // Ne garde que le français et l'anglais pour alléger l'APK
         resourceConfigurations.addAll(listOf("fr", "en"))
     }
 
-    // APK UNIVERSEL MONOLITHIQUE (repartageable tel quel via le Mode Invite Web)
     splits {
         abi { isEnable = false }
         density { isEnable = false }
@@ -74,6 +72,13 @@ dependencies {
     implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
     implementation("io.ktor:ktor-server-cio:2.3.12")
     implementation("com.google.zxing:core:3.5.3")
+
+    // Caméra légère pour scanner le QR Code Wi-Fi directement dans l'app
+    val cameraxVersion = "1.4.2"
+    implementation("androidx.camera:camera-core:$cameraxVersion")
+    implementation("androidx.camera:camera-camera2:$cameraxVersion")
+    implementation("androidx.camera:camera-lifecycle:$cameraxVersion")
+    implementation("androidx.camera:camera-view:$cameraxVersion")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
