@@ -27,6 +27,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -94,14 +95,19 @@ fun NetworkAssistBar(
     ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Icon(
-                    imageVector = if (network.hotspotInfo != null) Icons.Default.WifiTethering else Icons.Default.Wifi,
-                    contentDescription = null,
-                    tint = if (network.wifiConnected) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.outline,
-                )
+                if (network.connectingWifi) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                } else {
+                    Icon(
+                        imageVector = if (network.hotspotInfo != null) Icons.Default.WifiTethering else Icons.Default.Wifi,
+                        contentDescription = null,
+                        tint = if (network.wifiConnected) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.outline,
+                    )
+                }
                 Column(Modifier.weight(1f)) {
                     Text(
                         text = when {
+                            network.connectingWifi -> "Connexion au Wi-Fi en cours…"
                             network.hotspotInfo != null -> "Point d'accès actif : ${network.hotspotInfo.ssid}"
                             network.wifiConnected -> "Wi-Fi actif (${network.wifiName.ifBlank { "réseau local" }})"
                             else -> "Aucun Wi-Fi connecté"
@@ -109,14 +115,14 @@ fun NetworkAssistBar(
                         style = MaterialTheme.typography.labelLarge,
                     )
                     val sub = buildString {
-                        if (network.hotspotInfo != null) append("Mot de passe : ${network.hotspotInfo.password}")
+                        if (network.hotspotInfo != null) append("Affichez le QR Code Wi-Fi ci-contre pour éviter le mot de passe")
                         else if (network.localIp.isNotBlank()) append("IP locale : ${network.localIp}")
-                        else append("Activez le Wi-Fi ou créez un Point d'accès")
+                        else append("Activez le Wi-Fi, créez un Point d'accès ou scannez un QR")
                     }
                     Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 if (network.hotspotInfo != null) {
-                    TextButton(onClick = { showQr = true }) {
+                    Button(onClick = { showQr = true }) {
                         Icon(Icons.Default.QrCode2, contentDescription = "QR Wi-Fi", modifier = Modifier.size(18.dp))
                     }
                 }
