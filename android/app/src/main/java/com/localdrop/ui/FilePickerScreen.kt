@@ -1,6 +1,5 @@
 package com.localdrop.ui
 
-import android.Manifest
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -13,7 +12,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -55,6 +53,11 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -67,6 +70,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.localdrop.files.ExplorerItem
 import com.localdrop.files.FileCategory
 import com.localdrop.files.SortField
+import com.localdrop.files.StorageScanner
 import com.localdrop.files.StorageVolumeInfo
 import com.localdrop.files.formatSize
 import com.localdrop.session.PickerUiState
@@ -93,7 +97,6 @@ fun FilePickerScreen(
     val ctx = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    // Actualise automatiquement quand on revient des Paramètres Android
     DisposableEffect(lifecycleOwner) {
         val obs = LifecycleEventObserver { _, ev ->
             if (ev == Lifecycle.Event.ON_RESUME) onRefresh()
@@ -102,9 +105,20 @@ fun FilePickerScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
     }
 
-    val legacyStorageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { onRefresh() }
+    val mediaPermLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        onRefresh()
+    }
     val safFilesLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { onSafFilesPicked(it) }
     val safTreeLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri -> uri?.let(onSafTreePicked) }
+
+    // Déclenche la vraie fenêtre Android de permission Médias/Fichiers la première fois si non accordée
+    var askedMediaOnce by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        if (!askedMediaOnce && !StorageScanner.hasMediaAccess(ctx)) {
+            askedMediaOnce = true
+            mediaPermLauncher.launch(StorageScanner.requiredMediaPermissions())
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -142,27 +156,35 @@ fun FilePickerScreen(
         }
     ) { pad ->
         Column(Modifier.fillMaxSize().padding(pad)) {
-            if (!state.hasAllFilesAccess) {
+            if (!state.hasMediaAccess || (!state.hasAllFilesAccess && state.canUseAllFilesScreen)) {
                 Card(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
                 ) {
-                    Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(
-                            "Autorisez l'accès aux fichiers pour naviguer librement dans la mémoire.",
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Button(onClick = {
-                            if (Build.VERSION.SDK_INT >= 30) {
-                                val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:${ctx.packageName}"))
-                                runCatching { ctx.startActivity(intent) }.onFailure {
-                                    ctx.startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
-                                }
+                            if (!state.hasMediaAccess) {
+                                "Autorisez l'accès aux médias pour afficher vos vidéos, musiques et photos."
                             } else {
-                                legacyStorageLauncher.launch(Manifest.permission.READ_EXTERNAL_STORAGE)
+                                "Médias autorisés ! Pour naviguer aussi dans tous les dossiers (.zip, .rar, .pdf), activez l'accès complet (ou utilisez + Fichier / + Dossier)."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (!state.hasMediaAccess) {
+                                Button(onClick = { mediaPermLauncher.launch(StorageScanner.requiredMediaPermissions()) }) {
+                                    Text("Autoriser Médias")
+                                }
                             }
-                        }) { Text("Autoriser") }
+                            if (!state.hasAllFilesAccess && state.canUseAllFilesScreen && Build.VERSION.SDK_INT >= 30) {
+                                OutlinedButton(onClick = {
+                                    val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:${ctx.packageName}"))
+                                    runCatching { ctx.startActivity(intent) }.onFailure {
+                                        ctx.startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+                                    }
+                                }) { Text("Accès complet") }
+                            }
+                        }
                     }
                 }
             }
@@ -185,11 +207,7 @@ fun FilePickerScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 FileCategory.entries.forEach { cat ->
-                    FilterChip(
-                        selected = state.category == cat,
-                        onClick = { onSelectCategory(cat) },
-                        label = { Text(cat.label) }
-                    )
+                    FilterChip(selected = state.category == cat, onClick = { onSelectCategory(cat) }, label = { Text(cat.label) })
                 }
             }
 
@@ -206,7 +224,6 @@ fun FilePickerScreen(
                         }
                     }
                 }
-
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -237,12 +254,12 @@ fun FilePickerScreen(
                 state.isProtectedDir -> Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(36.dp))
-                        Text("Dossier protégé par Android (Android/data ou obb).", fontWeight = FontWeight.Medium)
-                        Button(onClick = { safTreeLauncher.launch(null) }) { Text("Ouvrir via le sélecteur système") }
+                        Text("Dossier protégé par Android.", fontWeight = FontWeight.Medium)
+                        Button(onClick = { safTreeLauncher.launch(null) }) { Text("Ouvrir via + Dossier") }
                     }
                 }
-                state.items.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("Aucun élément trouvé.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                state.items.isEmpty() -> Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+                    Text("Aucun élément visible ici. Utilisez + Fichier ou + Dossier en haut à droite.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 else -> LazyColumn(Modifier.fillMaxSize().padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     items(state.items, key = { it.key }) { item ->
