@@ -15,3 +15,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "LocalDrop"
 include(":app")
+
