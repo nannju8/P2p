@@ -48,6 +48,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.localdrop.data.AppSettings
@@ -257,9 +258,10 @@ fun SettingsScreen(
     onChangeTheme: (ThemeMode) -> Unit,
     onBack: () -> Unit,
 ) {
+    val ctx = LocalContext.current
     var name by remember(settings.deviceName) { mutableStateOf(settings.deviceName) }
     var dest by remember(settings.destinationPath) { mutableStateOf(settings.destinationPath) }
-    val defaultPath = remember { FileReceiver.resolveDestinationDir(androidx.compose.ui.platform.LocalContext.current).path }
+    val defaultPath = remember(ctx) { FileReceiver.resolveDestinationDir(ctx).path }
 
     Scaffold(
         topBar = {
