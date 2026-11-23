@@ -15,11 +15,12 @@ android {
         versionCode = 1
         versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        androidResources {
+            localeFilters += listOf("fr", "en")
+        }
     }
 
-    // ── APK UNIVERSEL MONOLITHIQUE ─────────────────────────────────────────
-    // Aucun split (ABI / densité / langue) : l'APK installé (applicationInfo.sourceDir)
-    // est un fichier unique, auto-suffisant, redistribuable tel quel vers un autre téléphone.
+    // APK UNIVERSEL MONOLITHIQUE (repartageable tel quel via le Mode Invite Web)
     splits {
         abi { isEnable = false }
         density { isEnable = false }
@@ -35,7 +36,6 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // À remplacer par votre keystore : un APK release DOIT être signé pour être installable.
             signingConfig = signingConfigs.getByName("debug")
         }
     }
@@ -72,14 +72,8 @@ dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
-
-    // Cryptographie : primitives éprouvées uniquement (aucune crypto maison)
-    implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")   // J-PAKE, HKDF, SHA-256
-
-    // Serveur HTTP embarqué pour le « Mode Invite Web »
+    implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
     implementation("io.ktor:ktor-server-cio:2.3.12")
-
-    // QR codes (Wi-Fi + URL)
     implementation("com.google.zxing:core:3.5.3")
 
     testImplementation("junit:junit:4.13.2")
