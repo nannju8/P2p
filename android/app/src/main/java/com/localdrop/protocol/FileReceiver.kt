@@ -14,11 +14,6 @@ import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 
-/**
- * Écriture sécurisée côté récepteur :
- *  .part temporaire → SHA-256 vérifié → renommage atomique → MediaScanner.
- * Les octets reçus ne peuvent jamais dépasser la taille annoncée.
- */
 class FileReceiver(
     private val destinationDir: File,
     private val manifest: Manifest,
@@ -40,9 +35,10 @@ class FileReceiver(
     private fun targetOf(e: FileEntry) = PathSanitizer.resolveSafe(destinationDir, e.relPath)
     private fun partOf(e: FileEntry): File = targetOf(e).let { File(it.parentFile, ".${it.name}.${e.size}.part") }
 
-    /** Vérifie l'espace libre (StatFs) et prépare les infos de reprise. */
     fun prepare(workers: Int): ManifestAck {
-        destinationDir.mkdirs()
+        if (!destinationDir.exists() && !destinationDir.mkdirs()) {
+            return ManifestAck(false, "Dossier de destination inaccessible : ${destinationDir.path}", 1, emptyMap())
+        }
         val resume = HashMap<Int, ResumeInfo>()
         var needed = 0L
         for (e in manifest.entries) {
@@ -89,12 +85,13 @@ class FileReceiver(
         a.received += len
     }
 
-    /** @return chemin final, ou lève IOException (le .part corrompu est alors supprimé). */
     fun finish(fileId: Int, expectedSha256: ByteArray): File {
         val a = active.remove(fileId) ?: throw IOException("transfert non démarré")
         try {
             a.out.flush()
-            a.out.fd.sync()
+            if (a.entry.size >= Limits.LARGE_FILE) {
+                runCatching { a.out.fd.sync() }
+            }
             a.out.close()
             if (a.received != a.entry.size) throw IOException("taille incomplète")
             if (!MessageDigest.isEqual(a.digest.digest(), expectedSha256)) throw IOException("empreinte SHA-256 différente")
@@ -113,7 +110,6 @@ class FileReceiver(
         return finalFile
     }
 
-    /** Annulation utilisateur : nettoie les .part. (Sur coupure réseau on les garde pour la reprise.) */
     fun abortAll(deletePartials: Boolean) {
         active.values.forEach {
             runCatching { it.out.close() }
@@ -140,9 +136,21 @@ class FileReceiver(
 
     companion object {
         const val SAFETY_MARGIN = 16L * 1024 * 1024
-        fun defaultDestinationDir(): File = File(
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-            "LocalDrop"
-        )
+
+        fun resolveDestinationDir(context: Context, preferred: File? = null): File {
+            val publicDir = preferred ?: File(
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                "LocalDrop"
+            )
+            if (canWriteTo(publicDir)) return publicDir
+            return File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir, "LocalDrop")
+                .also { it.mkdirs() }
+        }
+
+        private fun canWriteTo(dir: File): Boolean = runCatching {
+            if (!dir.exists() && !dir.mkdirs()) return false
+            val probe = File(dir, ".ld_probe_${System.nanoTime()}")
+            probe.createNewFile().also { if (it) probe.delete() }
+        }.getOrDefault(false)
     }
 }
