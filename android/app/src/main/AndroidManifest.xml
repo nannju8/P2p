@@ -2,7 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- INTERNET = simple droit d'ouvrir des sockets TCP/UDP. Aucune donnée ne quitte le réseau local. -->
+    <!-- INTERNET = simple droit d'ouvrir des sockets locaux TCP/UDP. Aucune donnée ne quitte le réseau local. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
@@ -11,15 +11,29 @@
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
-    <!-- Android 13+ : Wi-Fi à proximité, déclaré « neverForLocation » : aucune position n'est dérivée -->
+    <!-- Android 13+ : Wi-Fi à proximité, jamais utilisé pour la localisation -->
     <uses-permission
         android:name="android.permission.NEARBY_WIFI_DEVICES"
         android:usesPermissionFlags="neverForLocation"
-        tools:targetApi="s" />
-    <!-- Android 8 → 12 : exigée par Android pour Wi-Fi Direct / LocalOnlyHotspot / scan. Aucune position collectée. -->
+        tools:targetApi="tiramisu" />
+    <!-- Android 8 à 12 : requis par le système pour Wi-Fi Direct / scan / Hotspot local -->
     <uses-permission
         android:name="android.permission.ACCESS_FINE_LOCATION"
         android:maxSdkVersion="32" />
+
+    <!-- Stockage : accès complet (comme Xender) + médias Android 11/12/13+ -->
+    <uses-permission
+        android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="29" />
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
 
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -34,7 +48,9 @@
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"
+        android:requestLegacyExternalStorage="true"
         android:supportsRtl="true"
         android:theme="@style/Theme.LocalDrop"
         android:usesCleartextTraffic="false"
