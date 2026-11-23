@@ -1,6 +1,7 @@
 package com.localdrop.files
 
 import android.Manifest
+import android.app.ActivityManager
 import android.content.ContentResolver
 import android.content.ContentUris
 import android.content.Context
@@ -40,7 +41,36 @@ object StorageScanner {
         }
     }
 
-    /** Détecte le stockage interne + toute carte SD amovible montée. */
+    fun hasMediaAccess(context: Context): Boolean {
+        if (hasAllFilesAccess(context)) return true
+        return if (Build.VERSION.SDK_INT >= 33) {
+            ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_IMAGES) == PackageManager.PERMISSION_GRANTED ||
+                ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_VIDEO) == PackageManager.PERMISSION_GRANTED ||
+                ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_AUDIO) == PackageManager.PERMISSION_GRANTED
+        } else {
+            ContextCompat.checkSelfPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    fun canUseAllFilesScreen(context: Context): Boolean {
+        if (Build.VERSION.SDK_INT < 30) return false
+        val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+        return am?.isLowRamDevice != true // Android Go désactive définitivement cet écran
+    }
+
+    fun requiredMediaPermissions(): Array<String> = when {
+        Build.VERSION.SDK_INT >= 33 -> arrayOf(
+            Manifest.permission.READ_MEDIA_IMAGES,
+            Manifest.permission.READ_MEDIA_VIDEO,
+            Manifest.permission.READ_MEDIA_AUDIO,
+        )
+        Build.VERSION.SDK_INT <= 29 -> arrayOf(
+            Manifest.permission.READ_EXTERNAL_STORAGE,
+            Manifest.permission.WRITE_EXTERNAL_STORAGE,
+        )
+        else -> arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+    }
+
     fun storageVolumes(context: Context): List<StorageVolumeInfo> {
         val result = mutableListOf<StorageVolumeInfo>()
         val seenPaths = HashSet<String>()
@@ -101,7 +131,6 @@ object StorageScanner {
         return result
     }
 
-    /** Navigation directe dans la mémoire (gère proprement Android/data et Android/obb sans crash). */
     suspend fun listDirectory(
         dir: File,
         query: String = "",
@@ -109,9 +138,7 @@ object StorageScanner {
         ascending: Boolean = true,
     ): DirectoryListing = withContext(Dispatchers.IO) {
         val raw = runCatching { dir.listFiles() }.getOrNull()
-        if (raw == null) {
-            return@withContext DirectoryListing(dir, emptyList(), isProtected = true)
-        }
+            ?: return@withContext DirectoryListing(dir, emptyList(), isProtected = true)
         val q = query.trim().lowercase(Locale.ROOT)
         val filtered = raw.filter { f ->
             !f.name.startsWith(".") && (q.isEmpty() || f.name.lowercase(Locale.ROOT).contains(q))
@@ -119,7 +146,6 @@ object StorageScanner {
         val mapped = filtered.map { f ->
             val isDir = f.isDirectory
             val children = if (isDir) runCatching { f.listFiles()?.count { !it.name.startsWith(".") } ?: -1 }.getOrDefault(-1) else 0
-            val protectedDir = isDir && children < 0
             ExplorerItem(
                 key = "file:${f.path}",
                 name = f.name,
@@ -130,13 +156,12 @@ object StorageScanner {
                 childCount = children.coerceAtLeast(0),
                 lastModifiedMs = f.lastModified(),
                 extension = if (isDir) "" else f.extension.lowercase(Locale.ROOT),
-                isProtected = protectedDir,
+                isProtected = isDir && children < 0,
             )
         }
         DirectoryListing(dir, sortItems(mapped, sort, ascending), isProtected = false)
     }
 
-    /** Chargement par catégorie (Vidéos, Audio, Photos, Documents, Archives & Applis). */
     suspend fun loadCategory(
         context: Context,
         category: FileCategory,
@@ -168,11 +193,7 @@ object StorageScanner {
         )
         runCatching {
             context.contentResolver.query(
-                collection,
-                projection,
-                null,
-                null,
-                "${MediaStore.MediaColumns.DATE_MODIFIED} DESC"
+                collection, projection, null, null, "${MediaStore.MediaColumns.DATE_MODIFIED} DESC"
             )?.use { c ->
                 val idCol = c.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
                 val nameCol = c.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME)
@@ -187,8 +208,7 @@ object StorageScanner {
                     val size = (if (sizeCol >= 0) c.getLong(sizeCol) else 0L).let { if (it > 0) it else fileObj?.length() ?: 0L }
                     if (size <= 0L) continue
                     val mod = (if (dateCol >= 0) c.getLong(dateCol) * 1000L else 0L).let { if (it > 0) it else fileObj?.lastModified() ?: 0L }
-                    val uri = fileObj?.let(Uri::fromFile) ?: ContentUris.withAppendedId(collection, id)
-                    val ext = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
+                    val uri = ContentUris.withAppendedId(collection, id)
                     result += ExplorerItem(
                         key = "media:$collection:$id",
                         name = name,
@@ -198,7 +218,7 @@ object StorageScanner {
                         size = size,
                         childCount = 0,
                         lastModifiedMs = mod,
-                        extension = ext,
+                        extension = name.substringAfterLast('.', "").lowercase(Locale.ROOT),
                     )
                 }
             }
@@ -206,11 +226,6 @@ object StorageScanner {
         return result
     }
 
-    /**
-     * Pour Documents et Archives (.rar, .7z, .zip, .apk, .pdf...) :
-     * si l'accès complet est accordé, scanne directement la mémoire pour trouver même les fichiers
-     * non encore indexés par MediaStore ; sinon repli sur MediaStore.Files.
-     */
     private fun scanExtensions(context: Context, extensions: Set<String>): List<ExplorerItem> {
         if (hasAllFilesAccess(context)) {
             val found = mutableListOf<ExplorerItem>()
@@ -220,7 +235,6 @@ object StorageScanner {
                     .onEnter { dir ->
                         if (dir.name.startsWith(".")) return@onEnter false
                         val p = dir.path
-                        // Évite les dossiers systèmes Android/data et Android/obb
                         if (p.endsWith("/Android/data") || p.endsWith("/Android/obb")) return@onEnter false
                         dir.canRead()
                     }
@@ -245,10 +259,7 @@ object StorageScanner {
             }
             return found
         }
-
-        // Repli MediaStore.Files si MANAGE_EXTERNAL_STORAGE refusé
-        val all = queryMediaStore(context, MediaStore.Files.getContentUri("external"))
-        return all.filter { it.extension in extensions }
+        return queryMediaStore(context, MediaStore.Files.getContentUri("external")).filter { it.extension in extensions }
     }
 
     private fun sortItems(items: List<ExplorerItem>, sort: SortField, ascending: Boolean): List<ExplorerItem> {
@@ -264,7 +275,6 @@ object StorageScanner {
         return items.sortedWith(base)
     }
 
-    /** Convertit des URI choisis via le sélecteur système SAF (`ACTION_OPEN_DOCUMENT`) en PickedItem. */
     fun fromSafUris(context: Context, uris: List<Uri>): List<PickedItem> {
         val resolver = context.contentResolver
         return uris.mapNotNull { uri ->
@@ -280,21 +290,10 @@ object StorageScanner {
                     }
                 }
             }
-            PickedItem(
-                key = "saf:$uri",
-                name = name,
-                uri = uri,
-                file = null,
-                isDirectory = false,
-                approximateSize = size,
-            )
+            PickedItem("saf:$uri", name, uri, null, isDirectory = false, approximateSize = size)
         }
     }
 
-    /**
-     * Transforme le panier utilisateur (fichiers + dossiers entiers) en lot prêt pour TransferEngine.sendBatch().
-     * Préserve l'arborescence des dossiers et garantit des `relPath` uniques et sûrs.
-     */
     suspend fun expandSelectionToBatch(context: Context, selected: List<PickedItem>): PreparedBatch =
         withContext(Dispatchers.IO) {
             val resolver = context.contentResolver
@@ -328,7 +327,7 @@ object StorageScanner {
                         }
                 } else if (item.isDirectory && item.uri.scheme == "content") {
                     collectSafTree(resolver, item.uri, item.name.ifBlank { "Dossier" }, ::addEntry)
-                } else if (f != null && f.isFile) {
+                } else if (f != null && f.isFile && f.canRead()) {
                     addEntry(f.name, Uri.fromFile(f), f.length())
                 } else {
                     val realSize = if (item.approximateSize > 0) item.approximateSize else queryUriSize(resolver, item.uri)
@@ -338,12 +337,7 @@ object StorageScanner {
             PreparedBatch(entries, sources, totalBytes)
         }
 
-    private fun collectSafTree(
-        resolver: ContentResolver,
-        treeUri: Uri,
-        prefix: String,
-        onFile: (String, Uri, Long) -> Unit,
-    ) {
+    private fun collectSafTree(resolver: ContentResolver, treeUri: Uri, prefix: String, onFile: (String, Uri, Long) -> Unit) {
         val docId = DocumentsContract.getTreeDocumentId(treeUri)
         val queue = ArrayDeque<Pair<String, String>>()
         queue.add(docId to prefix)
@@ -366,12 +360,8 @@ object StorageScanner {
                         val name = c.getString(1) ?: "element"
                         val mime = c.getString(2)
                         val size = c.getLong(3)
-                        if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
-                            queue.add(id to "$curPrefix/$name")
-                        } else {
-                            val fileUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, id)
-                            onFile("$curPrefix/$name", fileUri, size.coerceAtLeast(0L))
-                        }
+                        if (mime == DocumentsContract.Document.MIME_TYPE_DIR) queue.add(id to "$curPrefix/$name")
+                        else onFile("$curPrefix/$name", DocumentsContract.buildDocumentUriUsingTree(treeUri, id), size.coerceAtLeast(0L))
                     }
                 }
             }
@@ -384,9 +374,7 @@ object StorageScanner {
                 if (c.moveToFirst()) return c.getLong(0).coerceAtLeast(0L)
             }
         }
-        return runCatching {
-            resolver.openFileDescriptor(uri, "r")?.use { it.statSize.coerceAtLeast(0L) } ?: 0L
-        }.getOrDefault(0L)
+        return runCatching { resolver.openFileDescriptor(uri, "r")?.use { it.statSize.coerceAtLeast(0L) } ?: 0L }.getOrDefault(0L)
     }
 
     private fun ensureUniqueRelPath(path: String, used: MutableSet<String>): String {
