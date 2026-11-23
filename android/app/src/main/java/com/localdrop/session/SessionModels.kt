@@ -36,6 +36,7 @@ data class NetworkBannerState(
     val localIp: String = "",
     val hotspotInfo: HotspotInfo? = null,
     val wifiDirectActive: Boolean = false,
+    val connectingWifi: Boolean = false,
     val error: String? = null,
 )
 
